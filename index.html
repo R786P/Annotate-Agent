@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Annotation Assist</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">🎬 Annotation Assist</div>
+    <nav>
+      <a href="#" class="nav-item active">Analyze Video</a>
+    </nav>
+    <div class="sidebar-footer">
+      {% if configured %}
+        <span class="status ok">● API connected</span>
+      {% else %}
+        <span class="status err">● ANTHROPIC_API_KEY missing</span>
+      {% endif %}
+    </div>
+  </aside>
+
+  <main class="content">
+    <h1>Video → Segment Suggestions</h1>
+    <p class="subtitle">Video record karke upload karo, client instructions paste karo — AI draft segments banayega. Tum khud Annotasks tool me final entry karoge.</p>
+
+    <form id="analyzeForm">
+      <label>Video file</label>
+      <input type="file" name="video" id="video" accept="video/*" required>
+
+      <label>Client instructions</label>
+      <textarea name="instructions" id="instructions" rows="6" placeholder="Jaise: har topic change pe naya segment banao, hotkeys X/Y use karo, etc." required></textarea>
+
+      <button type="submit" id="submitBtn">Analyze</button>
+    </form>
+
+    <div id="loading" class="hidden">⏳ Video analyze ho raha hai, thoda time lagega (video length pe depend karta hai)...</div>
+    <div id="error" class="hidden error-box"></div>
+
+    <div id="results" class="hidden">
+      <h2>Suggested Segments</h2>
+      <p class="meta" id="metaInfo"></p>
+      <table>
+        <thead>
+          <tr><th>Start</th><th>End</th><th>Label</th><th>Reason</th></tr>
+        </thead>
+        <tbody id="resultsBody"></tbody>
+      </table>
+    </div>
+  </main>
+</div>
+
+<script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
