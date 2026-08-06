@@ -18,13 +18,21 @@ form.addEventListener('submit', async (e) => {
 
   try {
     const res = await fetch('/analyze', { method: 'POST', body: formData });
-    const data = await res.json();
+
+    let data;
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      data = await res.json();
+    } else {
+      const text = await res.text();
+      throw new Error(`Server error (status ${res.status}): ${text.slice(0, 200)}`);
+    }
 
     if (!res.ok) {
       throw new Error(data.error || 'Kuch galat ho gaya.');
     }
 
-    metaInfo.textContent = `${data.frames_analyzed} frames analyze kiye, video ~${Math.round(data.duration)}s`;
+    metaInfo.textContent = `${data.segments.length} segments mile`;
     resultsBody.innerHTML = '';
     data.segments.forEach(seg => {
       const tr = document.createElement('tr');
