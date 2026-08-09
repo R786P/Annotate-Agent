@@ -137,17 +137,16 @@ def live_token():
             }
         }
 
-        # Ephemeral auth tokens are currently created on the v1alpha Live API surface.
         resp = requests.post(
-            'https://generativelanguage.googleapis.com/v1alpha/auth_tokens',
+            'https://generativelanguage.googleapis.com/v1beta/auth_tokens',
             headers={'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json'},
             json=payload,
             timeout=20
         )
 
         if resp.status_code != 200:
-            print('Live token error:', resp.status_code, resp.text[:500])
-            return jsonify({"error": f"Gemini Live token create nahi ho saka (HTTP {resp.status_code})."}), 500
+            print('Live token error:', resp.text[:500])
+            return jsonify({"error": "Gemini Live token create nahi ho saka."}), 500
 
         data = resp.json()
         token = data.get('name')
