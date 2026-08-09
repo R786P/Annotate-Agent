@@ -38,7 +38,6 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
-import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import okhttp3.Call
@@ -50,10 +49,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
-import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 class LiveScreenService : Service() {
@@ -182,10 +181,10 @@ class LiveScreenService : Service() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 val setupRoot = JSONObject().put("setup", JSONObject())
                 val setup = setupRoot.getJSONObject("setup")
-                setup.put("model", "models/$model")
-                setup.put("generationConfig", JSONObject().put("responseModalities", org.json.JSONArray().put("AUDIO")).put("temperature", 0.2))
+                setup.put("model", if (model.startsWith("models/")) model else "models/$model")
+                setup.put("generationConfig", JSONObject().put("responseModalities", JSONArray().put("AUDIO")).put("temperature", 0.2))
                 setup.put("outputAudioTranscription", JSONObject())
-                val instruction = JSONObject().put("parts", org.json.JSONArray().put(JSONObject().put("text", "Tum Annotate Agent ho. User ke phone screen ke live frames ko dekho. User Hindi/Hinglish me sawaal kare to concise Hindi/Hinglish me jawab do. Visible buttons, errors, text aur UI ko explain karo. Jawab natural Hindi/Hinglish voice me do. Passwords, OTPs, API keys aur private secrets ko repeat mat karo.")))
+                val instruction = JSONObject().put("parts", JSONArray().put(JSONObject().put("text", "Tum Annotate Agent ho. User ke phone screen ke live frames ko dekho. User Hindi/Hinglish me sawaal kare to concise Hindi/Hinglish me jawab do. Visible buttons, errors, text aur UI ko explain karo. Jawab natural Hindi/Hinglish voice me do. Passwords, OTPs, API keys aur private secrets ko repeat mat karo.")))
                 setup.put("systemInstruction", instruction)
                 webSocket.send(setupRoot.toString())
                 showAnswer("🟢 Live connected. Screen dekh raha hoon. Panda bubble par 🎙️ dabakar bolo ya bubble tap karke chat kholo.")
@@ -289,7 +288,7 @@ class LiveScreenService : Service() {
             setTextColor(Color.WHITE)
             setPadding(10, 10, 10, 10)
         }
-        container.addView(answerView, LinearLayout.LayoutParams(-1, 0, 1f).apply { minHeight = 180 })
+        container.addView(answerView, LinearLayout.LayoutParams(-1, 0, 1f))
         questionInput = EditText(this).apply {
             hint = "Chat me sawaal likho..."
             setTextColor(Color.WHITE)
@@ -352,8 +351,25 @@ class LiveScreenService : Service() {
     }
 
     private fun sendText(question: String) {
-        webSocket?.send(JSONObject().put("realtimeInput", JSONObject().put("text", question)).toString())
-        showAnswer("You: $question")
+        val socket = webSocket
+        if (socket == null) {
+            showAnswer("🔴 Live connection ready nahi hai. Panda ko restart karke dobara try karo.")
+            return
+        }
+        val message = JSONObject()
+            .put("clientContent", JSONObject()
+                .put("turns", JSONArray().put(
+                    JSONObject()
+                        .put("role", "user")
+                        .put("parts", JSONArray().put(JSONObject().put("text", question)))
+                ))
+                .put("turnComplete", true)
+            )
+        if (socket.send(message.toString())) {
+            showAnswer("You: $question\n\n⏳ Soch raha hoon...")
+        } else {
+            showAnswer("🔴 Message send nahi hua. Live connection dobara start karo.")
+        }
     }
 
     private fun showAnswer(text: String) {
@@ -430,17 +446,13 @@ class LiveScreenService : Service() {
             paint.shader = RadialGradient(cx - 10f, cy - 12f, w * .72f, intArrayOf(Color.rgb(255,255,255), Color.rgb(210,218,230), Color.rgb(125,135,150)), floatArrayOf(0f,.48f,1f), Shader.TileMode.CLAMP)
             paint.setShadowLayer(12f, 0f, 5f, Color.argb(150, 0, 0, 0))
             canvas.drawCircle(cx, cy, w * .40f, paint)
-            paint.clearShadowLayer()
-            paint.shader = null
-
+            paint.clearShadowLayer(); paint.shader = null
             paint.color = Color.rgb(35,35,38)
             canvas.drawCircle(cx - w*.22f, cy - h*.20f, w*.16f, paint)
             canvas.drawCircle(cx + w*.22f, cy - h*.20f, w*.16f, paint)
-
             paint.shader = RadialGradient(cx - 8f, cy - 12f, w*.38f, Color.WHITE, Color.rgb(205,210,218), Shader.TileMode.CLAMP)
             canvas.drawOval(cx - w*.30f, cy - h*.28f, cx + w*.30f, cy + h*.30f, paint)
             paint.shader = null
-
             paint.color = Color.rgb(30,30,32)
             canvas.drawOval(cx - w*.17f, cy - h*.04f, cx - w*.08f, cy + h*.08f, paint)
             canvas.drawOval(cx + w*.08f, cy - h*.04f, cx + w*.17f, cy + h*.08f, paint)
@@ -452,7 +464,6 @@ class LiveScreenService : Service() {
             paint.style = Paint.Style.STROKE; paint.strokeWidth = 2.5f
             canvas.drawArc(cx - w*.12f, cy + h*.10f, cx + w*.12f, cy + h*.27f, 15f, 150f, false, paint)
             paint.style = Paint.Style.FILL
-
             val micCx = w*.72f; val micCy = h*.78f; val micR = w*.19f
             paint.shader = LinearGradient(0f, micCy-micR, 0f, micCy+micR, if (listening) Color.rgb(244,80,105) else Color.rgb(91,91,247), Color.rgb(35,35,90), Shader.TileMode.CLAMP)
             paint.setShadowLayer(7f, 0f, 2f, Color.argb(160,0,0,0))
