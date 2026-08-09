@@ -34,6 +34,22 @@ body {
   cursor: pointer;
 }
 
+.live-screen-btn {
+  margin-top: 10px;
+  background: #2a2a2e;
+  color: #fff;
+  border: 1px solid #3a3a3e;
+  border-radius: 8px;
+  padding: 10px 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.live-screen-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 .sidebar-footer {
   margin-top: auto;
   font-size: 10px;
@@ -57,6 +73,57 @@ body {
   font-size: 15px;
   border-bottom: 1px solid #2a2a2e;
   flex-shrink: 0;
+}
+
+.live-status {
+  margin-left: 8px;
+  color: #9a9a9e;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.live-status.active {
+  color: #f87171;
+}
+
+.live-screen-panel {
+  padding: 12px 16px;
+  border-bottom: 1px solid #2a2a2e;
+  background: #111113;
+  flex-shrink: 0;
+}
+
+.live-screen-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.live-screen-top button {
+  background: #2a2a2e;
+  color: #fff;
+  border: 1px solid #3a3a3e;
+  border-radius: 7px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+#liveScreenPreview {
+  width: 100%;
+  max-height: 320px;
+  display: block;
+  object-fit: contain;
+  border-radius: 10px;
+  background: #050505;
+}
+
+#liveScreenStatus {
+  margin-top: 7px;
+  font-size: 11px;
+  color: #9a9a9e;
 }
 
 .chat-messages {
@@ -194,3 +261,8 @@ body {
 }
 
 .send-btn:disabled { opacity: 0.5; }
+
+@media (max-width: 600px) {
+  .live-screen-panel { padding: 8px; }
+  #liveScreenPreview { max-height: 220px; }
+}
