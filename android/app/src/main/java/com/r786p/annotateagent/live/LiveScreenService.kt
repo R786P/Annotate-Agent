@@ -5,10 +5,14 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
+import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.RadialGradient
+import android.graphics.Shader
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.AudioAttributes
@@ -19,15 +23,22 @@ import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
 import android.provider.Settings
 import android.util.Base64
 import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import okhttp3.Call
@@ -42,6 +53,7 @@ import okhttp3.WebSocketListener
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 class LiveScreenService : Service() {
@@ -65,13 +77,15 @@ class LiveScreenService : Service() {
     private var captureHandler: Handler? = null
     private var windowManager: WindowManager? = null
     private var overlayView: LinearLayout? = null
-    private var bubble: TextView? = null
+    private var bubble: PandaBubbleView? = null
     private var answerView: TextView? = null
     private var questionInput: EditText? = null
     private var backendUrl = ""
     private var lastFrameAt = 0L
     private var stopped = false
     private var audioTrack: AudioTrack? = null
+    private var recognizer: SpeechRecognizer? = null
+    private var listening = false
 
     override fun onCreate() {
         super.onCreate()
@@ -81,20 +95,12 @@ class LiveScreenService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (stopped) return START_NOT_STICKY
-        val voiceQuestion = intent?.getStringExtra("voice_question")?.trim()
-        if (!voiceQuestion.isNullOrBlank()) {
-            sendText(voiceQuestion)
-            return START_STICKY
-        }
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
         val resultData = intent?.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
-        backendUrl = intent?.getStringExtra(EXTRA_BACKEND_URL)?.trimEnd('/') ?: ""
-        if (resultCode == 0 || resultData == null || backendUrl.isBlank()) {
-            stopSelf()
-            return START_NOT_STICKY
-        }
+        backendUrl = intent?.getStringExtra(EXTRA_BACKEND_URL)?.trimEnd('/') ?: backendUrl
+        if (resultCode == 0 || resultData == null || backendUrl.isBlank()) return START_STICKY
         if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            startForeground(NOTIFICATION_ID, buildNotification(), android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
         } else {
             startForeground(NOTIFICATION_ID, buildNotification())
         }
@@ -182,7 +188,7 @@ class LiveScreenService : Service() {
                 val instruction = JSONObject().put("parts", org.json.JSONArray().put(JSONObject().put("text", "Tum Annotate Agent ho. User ke phone screen ke live frames ko dekho. User Hindi/Hinglish me sawaal kare to concise Hindi/Hinglish me jawab do. Visible buttons, errors, text aur UI ko explain karo. Jawab natural Hindi/Hinglish voice me do. Passwords, OTPs, API keys aur private secrets ko repeat mat karo.")))
                 setup.put("systemInstruction", instruction)
                 webSocket.send(setupRoot.toString())
-                showAnswer("🟢 Live connected. Screen dekh raha hoon. 🎤 se sawaal poochho.")
+                showAnswer("🟢 Live connected. Screen dekh raha hoon. Panda bubble par 🎙️ dabakar bolo ya bubble tap karke chat kholo.")
             }
             override fun onMessage(webSocket: WebSocket, text: String) { parseGeminiMessage(text) }
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { showAnswer("Gemini Live connection error: ${t.message ?: "unknown error"}") }
@@ -238,30 +244,111 @@ class LiveScreenService : Service() {
     }
 
     private fun showOverlay() {
-        if (overlayView != null) return
+        if (bubble != null) return
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        bubble = TextView(this).apply {
-            text = "🤖"; textSize = 22f; gravity = Gravity.CENTER; setTextColor(Color.WHITE); setBackgroundColor(Color.rgb(91, 91, 247)); setPadding(14, 10, 14, 10); setOnClickListener { togglePanel() }
+        bubble = PandaBubbleView(this).apply {
+            setOnBubbleClickListener { togglePanel() }
+            setOnMicClickListener { startVoiceInput() }
         }
-        val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(12, 12, 12, 12); setBackgroundColor(Color.rgb(25, 25, 28)) }
-        answerView = TextView(this).apply { text = "Live screen active"; textSize = 14f; setTextColor(Color.WHITE); setPadding(10, 10, 10, 10) }
-        container.addView(answerView, LinearLayout.LayoutParams(-1, 0, 1f))
-        questionInput = EditText(this).apply { hint = "Kya poochna hai?"; setTextColor(Color.WHITE); setHintTextColor(Color.LTGRAY); setSingleLine(false) }
-        container.addView(questionInput, LinearLayout.LayoutParams(-1, -2))
-        val ask = Button(this).apply { text = "Ask"; setOnClickListener { val q = questionInput?.text?.toString()?.trim().orEmpty(); if (q.isNotBlank()) { sendText(q); questionInput?.setText("") } } }
-        container.addView(ask, LinearLayout.LayoutParams(-1, -2))
-        val stop = Button(this).apply { text = "Stop Live"; setOnClickListener { stopSelf(); stopService(Intent(this@LiveScreenService, VoiceOverlayService::class.java)) } }
-        container.addView(stop, LinearLayout.LayoutParams(-1, -2))
-        overlayView = container
-        val bubbleParams = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.CENTER_VERTICAL or Gravity.END; x = 18; y = 0 }
-        windowManager?.addView(bubble, bubbleParams)
+        val params = WindowManager.LayoutParams(
+            88, 88,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.CENTER_VERTICAL or Gravity.END; x = 12; y = 0 }
+        try { windowManager?.addView(bubble, params) } catch (_: Exception) { stopSelf() }
     }
 
     private fun togglePanel() {
-        val current = overlayView ?: return
-        if (current.parent != null) { windowManager?.removeView(current); return }
-        val params = WindowManager.LayoutParams((resources.displayMetrics.widthPixels * 0.82).toInt(), WindowManager.LayoutParams.WRAP_CONTENT, if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.CENTER }
-        windowManager?.addView(current, params)
+        val current = overlayView
+        if (current?.parent != null) {
+            windowManager?.removeView(current)
+            return
+        }
+        if (current == null) buildPanel()
+        val panel = overlayView ?: return
+        val params = WindowManager.LayoutParams(
+            (resources.displayMetrics.widthPixels * 0.84).toInt(),
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.CENTER }
+        try { windowManager?.addView(panel, params) } catch (_: Exception) { }
+    }
+
+    private fun buildPanel() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(18, 18, 18, 18)
+            setBackgroundColor(Color.rgb(25, 25, 28))
+        }
+        answerView = TextView(this).apply {
+            text = "Live screen active"
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setPadding(10, 10, 10, 10)
+        }
+        container.addView(answerView, LinearLayout.LayoutParams(-1, 0, 1f).apply { minHeight = 180 })
+        questionInput = EditText(this).apply {
+            hint = "Chat me sawaal likho..."
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.LTGRAY)
+            setSingleLine(false)
+        }
+        container.addView(questionInput, LinearLayout.LayoutParams(-1, -2))
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val ask = Button(this).apply {
+            text = "Send"
+            setOnClickListener {
+                val q = questionInput?.text?.toString()?.trim().orEmpty()
+                if (q.isNotBlank()) { sendText(q); questionInput?.setText("") }
+            }
+        }
+        val close = Button(this).apply {
+            text = "Close"
+            setOnClickListener { overlayView?.let { if (it.parent != null) windowManager?.removeView(it) } }
+        }
+        row.addView(ask, LinearLayout.LayoutParams(0, -2, 1f))
+        row.addView(close, LinearLayout.LayoutParams(0, -2, 1f))
+        container.addView(row)
+        overlayView = container
+    }
+
+    private fun startVoiceInput() {
+        if (listening) {
+            recognizer?.stopListening()
+            return
+        }
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            showAnswer("Voice input is phone par available nahi hai.")
+            return
+        }
+        recognizer?.destroy()
+        recognizer = SpeechRecognizer.createSpeechRecognizer(this)
+        recognizer?.setRecognitionListener(object : RecognitionListener {
+            override fun onReadyForSpeech(params: Bundle?) { listening = true; bubble?.setListening(true); showAnswer("🎙️ Sun raha hoon...") }
+            override fun onBeginningOfSpeech() { listening = true; bubble?.setListening(true) }
+            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onBufferReceived(buffer: ByteArray?) {}
+            override fun onEndOfSpeech() { listening = false; bubble?.setListening(false) }
+            override fun onError(error: Int) { listening = false; bubble?.setListening(false); showAnswer("🎙️ Voice samajh nahi aayi. Dobara panda ke 🎙️ par tap karo.") }
+            override fun onResults(results: Bundle?) {
+                listening = false
+                bubble?.setListening(false)
+                val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+                if (text.isNotBlank()) sendText(text) else showAnswer("🎙️ Kuch sunai nahi diya.")
+            }
+            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        })
+        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "hi-IN")
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+        }
+        try { recognizer?.startListening(intent) } catch (_: Exception) { listening = false; bubble?.setListening(false) }
     }
 
     private fun sendText(question: String) {
@@ -269,14 +356,26 @@ class LiveScreenService : Service() {
         showAnswer("You: $question")
     }
 
-    private fun showAnswer(text: String) { Handler(mainLooper).post { answerView?.text = text } }
+    private fun showAnswer(text: String) {
+        Handler(mainLooper).post { answerView?.text = text }
+    }
 
-    private fun buildNotification(): Notification = Notification.Builder(this, CHANNEL_ID).setContentTitle("Annotate Agent Live").setContentText("Screen live analysis active").setSmallIcon(android.R.drawable.ic_menu_view).setOngoing(true).build()
+    private fun buildNotification(): Notification = Notification.Builder(this, CHANNEL_ID)
+        .setContentTitle("Annotate Agent Live")
+        .setContentText("Screen live analysis active")
+        .setSmallIcon(android.R.drawable.ic_menu_view)
+        .setOngoing(true)
+        .build()
 
-    private fun createNotificationChannel() { getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL_ID, "Annotate Agent Live Screen", NotificationManager.IMPORTANCE_LOW)) }
+    private fun createNotificationChannel() {
+        getSystemService(NotificationManager::class.java).createNotificationChannel(
+            NotificationChannel(CHANNEL_ID, "Annotate Agent Live Screen", NotificationManager.IMPORTANCE_LOW)
+        )
+    }
 
     override fun onDestroy() {
         stopped = true
+        recognizer?.destroy(); recognizer = null; listening = false
         webSocket?.close(1000, "User stopped Live Screen"); webSocket = null
         try { audioTrack?.stop() } catch (_: Exception) { }
         audioTrack?.release(); audioTrack = null
@@ -284,11 +383,87 @@ class LiveScreenService : Service() {
         imageReader?.close(); imageReader = null
         mediaProjection?.stop(); mediaProjection = null
         captureThread?.quitSafely(); captureThread = null; captureHandler = null
-        try { overlayView?.let { if (it.parent != null) windowManager?.removeView(it) }; bubble?.let { if (it.parent != null) windowManager?.removeView(it) } } catch (_: Exception) { }
+        try {
+            overlayView?.let { if (it.parent != null) windowManager?.removeView(it) }
+            bubble?.let { if (it.parent != null) windowManager?.removeView(it) }
+        } catch (_: Exception) { }
         overlayView = null; bubble = null
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    private class PandaBubbleView(context: android.content.Context) : View(context) {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        private var listening = false
+        private var onBubbleClick: (() -> Unit)? = null
+        private var onMicClick: (() -> Unit)? = null
+        private var downX = 0f
+        private var downY = 0f
+
+        init { setLayerType(View.LAYER_TYPE_SOFTWARE, null) }
+
+        fun setOnBubbleClickListener(listener: () -> Unit) { onBubbleClick = listener }
+        fun setOnMicClickListener(listener: () -> Unit) { onMicClick = listener }
+        fun setListening(value: Boolean) { listening = value; invalidate() }
+
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { downX = event.x; downY = event.y; return true }
+                MotionEvent.ACTION_UP -> {
+                    val dx = event.x - downX; val dy = event.y - downY
+                    if (dx * dx + dy * dy > 100) return true
+                    val cx = width * 0.72f; val cy = height * 0.78f
+                    val r = width * 0.20f
+                    if ((event.x - cx) * (event.x - cx) + (event.y - cy) * (event.y - cy) <= r * r) onMicClick?.invoke()
+                    else onBubbleClick?.invoke()
+                    return true
+                }
+            }
+            return true
+        }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val w = width.toFloat(); val h = height.toFloat(); val cx = w / 2f; val cy = h / 2f
+            paint.shader = RadialGradient(cx - 10f, cy - 12f, w * .72f, intArrayOf(Color.rgb(255,255,255), Color.rgb(210,218,230), Color.rgb(125,135,150)), floatArrayOf(0f,.48f,1f), Shader.TileMode.CLAMP)
+            paint.setShadowLayer(12f, 0f, 5f, Color.argb(150, 0, 0, 0))
+            canvas.drawCircle(cx, cy, w * .40f, paint)
+            paint.clearShadowLayer()
+            paint.shader = null
+
+            paint.color = Color.rgb(35,35,38)
+            canvas.drawCircle(cx - w*.22f, cy - h*.20f, w*.16f, paint)
+            canvas.drawCircle(cx + w*.22f, cy - h*.20f, w*.16f, paint)
+
+            paint.shader = RadialGradient(cx - 8f, cy - 12f, w*.38f, Color.WHITE, Color.rgb(205,210,218), Shader.TileMode.CLAMP)
+            canvas.drawOval(cx - w*.30f, cy - h*.28f, cx + w*.30f, cy + h*.30f, paint)
+            paint.shader = null
+
+            paint.color = Color.rgb(30,30,32)
+            canvas.drawOval(cx - w*.17f, cy - h*.04f, cx - w*.08f, cy + h*.08f, paint)
+            canvas.drawOval(cx + w*.08f, cy - h*.04f, cx + w*.17f, cy + h*.08f, paint)
+            paint.color = Color.WHITE
+            canvas.drawCircle(cx - w*.135f, cy - h*.005f, w*.028f, paint)
+            canvas.drawCircle(cx + w*.135f, cy - h*.005f, w*.028f, paint)
+            paint.color = Color.rgb(35,35,38)
+            canvas.drawOval(cx - w*.06f, cy + h*.08f, cx + w*.06f, cy + h*.18f, paint)
+            paint.style = Paint.Style.STROKE; paint.strokeWidth = 2.5f
+            canvas.drawArc(cx - w*.12f, cy + h*.10f, cx + w*.12f, cy + h*.27f, 15f, 150f, false, paint)
+            paint.style = Paint.Style.FILL
+
+            val micCx = w*.72f; val micCy = h*.78f; val micR = w*.19f
+            paint.shader = LinearGradient(0f, micCy-micR, 0f, micCy+micR, if (listening) Color.rgb(244,80,105) else Color.rgb(91,91,247), Color.rgb(35,35,90), Shader.TileMode.CLAMP)
+            paint.setShadowLayer(7f, 0f, 2f, Color.argb(160,0,0,0))
+            canvas.drawCircle(micCx, micCy, micR, paint)
+            paint.clearShadowLayer(); paint.shader = null
+            paint.color = Color.WHITE
+            paint.strokeWidth = 2.5f; paint.style = Paint.Style.STROKE
+            canvas.drawRoundRect(micCx-w*.055f, micCy-w*.09f, micCx+w*.055f, micCy+w*.06f, w*.055f, w*.055f, paint)
+            canvas.drawArc(micCx-w*.10f, micCy-w*.015f, micCx+w*.10f, micCy+w*.12f, 0f, 180f, false, paint)
+            canvas.drawLine(micCx, micCy+w*.12f, micCx, micCy+w*.17f, paint)
+            paint.style = Paint.Style.FILL
+        }
+    }
 }
