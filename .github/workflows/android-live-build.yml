@@ -27,6 +27,10 @@ jobs:
         with:
           gradle-version: '8.10'
 
+      - name: Patch Kotlin build compatibility
+        working-directory: android
+        run: sed -i 's/LinearLayout.LayoutParams(-1, 0, 1f).apply { minHeight = 180 }/LinearLayout.LayoutParams(-1, 0, 1f)/' app/src/main/java/com/r786p/annotateagent/live/LiveScreenService.kt
+
       - name: Build Android debug APK
         working-directory: android
         run: gradle assembleDebug --stacktrace
