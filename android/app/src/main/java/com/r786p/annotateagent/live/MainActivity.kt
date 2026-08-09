@@ -11,7 +11,6 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.Gravity
-import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -27,7 +26,7 @@ class MainActivity : AppCompatActivity() {
         private const val REQUEST_NOTIFICATION = 4102
         private const val PREFS = "annotate_live"
         private const val URL_KEY = "backend_url"
-        private const val DEFAULT_BACKEND = "https://YOUR-RENDER-APP.onrender.com"
+        private const val DEFAULT_BACKEND = "https://annotate-agent.onrender.com"
     }
 
     private var waitingForOverlay = false
