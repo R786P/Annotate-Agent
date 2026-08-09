@@ -10,6 +10,7 @@
 <div class="layout">
   <aside class="sidebar">
     <button class="new-chat-btn" id="newChatBtn">+ New Chat</button>
+    <button class="live-screen-btn" id="liveScreenBtn" type="button">🔴 Live Screen</button>
     <div class="sidebar-footer">
       {% if configured %}
         <span class="status ok">● API connected</span>
@@ -20,7 +21,19 @@
   </aside>
 
   <main class="chat-area">
-    <div class="chat-header">🎬 Annotation Assist</div>
+    <div class="chat-header">
+      🎬 Annotation Assist
+      <span id="liveStatus" class="live-status">Offline</span>
+    </div>
+
+    <div id="liveScreenPanel" class="live-screen-panel hidden">
+      <div class="live-screen-top">
+        <span>🔴 LIVE SCREEN</span>
+        <button type="button" id="stopLiveScreenBtn">Stop</button>
+      </div>
+      <video id="liveScreenPreview" autoplay muted playsinline></video>
+      <div id="liveScreenStatus">Screen share start nahi hua.</div>
+    </div>
 
     <div class="chat-messages" id="chatMessages">
       <div class="msg msg-bot">
