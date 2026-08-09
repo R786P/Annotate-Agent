@@ -26,5 +26,8 @@
             android:name=".LiveScreenService"
             android:exported="false"
             android:foregroundServiceType="mediaProjection" />
+        <service
+            android:name=".VoiceOverlayService"
+            android:exported="false" />
     </application>
 </manifest>
