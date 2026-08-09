@@ -38,7 +38,7 @@
     <div class="chat-messages" id="chatMessages">
       <div class="msg msg-bot">
         <div class="bubble">
-          👋 Video bhejo aur batao kya karna hai (jaise "segments banao topic change pe"). Main video dekh ke draft segments bana dunga — timestamps ke saath.
+          👋 Video bhejo aur batao kya karna hai. Neeche wale ek hi chat bubble me text ya 🎙️ voice dono se baat kar sakte ho.
         </div>
       </div>
     </div>
@@ -47,8 +47,11 @@
       <input type="file" id="videoInput" accept="video/*" hidden>
       <button type="button" id="attachBtn" class="icon-btn" title="Video attach karo">📎</button>
       <span id="fileChip" class="file-chip hidden"></span>
-      <textarea id="textInput" placeholder="Instructions likho... (jaise: har topic change pe segment banao)" rows="1"></textarea>
-      <button type="submit" id="sendBtn" class="send-btn">➤</button>
+      <div class="composer-bubble">
+        <textarea id="textInput" placeholder="Message likho ya 🎙️ dabakar bolo..." rows="1"></textarea>
+        <button type="button" id="voiceBtn" class="voice-btn" title="Voice input on/off" aria-label="Voice input">🎙️</button>
+      </div>
+      <button type="submit" id="sendBtn" class="send-btn" title="Send">➤</button>
     </form>
   </main>
 </div>
