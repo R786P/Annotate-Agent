@@ -48,9 +48,9 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_HORIZONTAL
             setPadding(40, 50, 40, 40)
         }
-        root.addView(TextView(this).apply { text = "🤖 Annotate Agent Live"; textSize = 28f }, LinearLayout.LayoutParams(-1, -2))
+        root.addView(TextView(this).apply { text = "🐼 Annotate Agent Live"; textSize = 28f }, LinearLayout.LayoutParams(-1, -2))
         root.addView(TextView(this).apply {
-            text = "Phone ki screen live dikhao aur kisi bhi app/website ke baare mein poochho."
+            text = "Phone ki screen live dikhao aur kisi bhi app/website ke baare mein poochho. Panda bubble me chat aur voice dono milenge."
             textSize = 16f
             setPadding(0, 20, 0, 20)
         }, LinearLayout.LayoutParams(-1, -2))
@@ -63,7 +63,7 @@ class MainActivity : AppCompatActivity() {
         val start = Button(this).apply { text = "🔴 Start Live Screen"; setOnClickListener { startLiveFlow() } }
         root.addView(start, LinearLayout.LayoutParams(-1, -2).apply { topMargin = 30 })
         root.addView(TextView(this).apply {
-            text = "Pehli baar screen-capture, microphone aur floating-bubble permission maangega. Start hone ke baad app ko background mein rakhkar Instagram, Chrome, YouTube ya koi bhi app khol sakte ho."
+            text = "Pehli baar screen-capture, microphone aur floating-bubble permission maangega. Start hone ke baad app ko background mein rakhkar Instagram, Chrome, YouTube ya koi bhi app khol sakte ho. Panda bubble par tap = chat, bubble ke 🎙️ icon par tap = voice."
             textSize = 14f
             setPadding(0, 25, 0, 0)
         }, LinearLayout.LayoutParams(-1, -2))
@@ -112,7 +112,6 @@ class MainActivity : AppCompatActivity() {
             putExtra(LiveScreenService.EXTRA_BACKEND_URL, backend)
         }
         ContextCompat.startForegroundService(this, serviceIntent)
-        ContextCompat.startForegroundService(this, Intent(this, VoiceOverlayService::class.java))
         finish()
     }
 }
