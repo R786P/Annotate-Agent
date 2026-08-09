@@ -7,6 +7,7 @@ import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
@@ -26,7 +27,6 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.graphics.Color
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -75,13 +75,11 @@ class LiveScreenService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (stopped) return START_NOT_STICKY
-
         val voiceQuestion = intent?.getStringExtra("voice_question")?.trim()
         if (!voiceQuestion.isNullOrBlank()) {
             sendText(voiceQuestion)
             return START_STICKY
         }
-
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
         val resultData = intent?.getParcelableExtra<Intent>(EXTRA_RESULT_DATA)
         backendUrl = intent?.getStringExtra(EXTRA_BACKEND_URL)?.trimEnd('/') ?: ""
@@ -89,7 +87,6 @@ class LiveScreenService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-
         if (Build.VERSION.SDK_INT >= 29) {
             startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
         } else {
@@ -153,11 +150,15 @@ class LiveScreenService : Service() {
             "?access_token=$token"
         webSocket = httpClient.newWebSocket(Request.Builder().url(wsUrl).build(), object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                val setup = JSONObject().put("setup", JSONObject()
-                    .put("model", "models/$model")
-                    .put("generationConfig", JSONObject().put("responseModalities", org.json.JSONArray().put("TEXT")).put("temperature", 0.2))
-                    .put("systemInstruction", JSONObject().put("parts", org.json.JSONArray().put(JSONObject().put("text",
-                        "Tum Annotate Agent ho. User ke phone screen ke live frames ko dekho. User Hindi/Hinglish me sawaal kare to concise Hindi/Hinglish me jawab do. Visible buttons, errors, text aur UI ko explain karo. Passwords, OTPs, API keys aur private secrets ko repeat mat karo."))))
+                val setup = JSONObject().put("setup", JSONObject())
+                setup.getJSONObject("setup").put("model", "models/$model")
+                setup.getJSONObject("setup").put("generationConfig", JSONObject()
+                    .put("responseModalities", org.json.JSONArray().put("TEXT"))
+                    .put("temperature", 0.2))
+                val instruction = JSONObject().put("parts", org.json.JSONArray().put(
+                    JSONObject().put("text", "Tum Annotate Agent ho. User ke phone screen ke live frames ko dekho. User Hindi/Hinglish me sawaal kare to concise Hindi/Hinglish me jawab do. Visible buttons, errors, text aur UI ko explain karo. Passwords, OTPs, API keys aur private secrets ko repeat mat karo.")
+                ))
+                setup.getJSONObject("setup").put("systemInstruction", instruction)
                 webSocket.send(setup.toString())
                 showAnswer("🟢 Live connected. Ab bubble ya 🎤 se sawaal poochho.")
             }
@@ -236,13 +237,6 @@ class LiveScreenService : Service() {
             setOnClickListener { val q = questionInput?.text?.toString()?.trim().orEmpty(); if (q.isNotBlank()) { sendText(q); questionInput?.setText("") } }
         }
         container.addView(ask, LinearLayout.LayoutParams(-1, -2))
-        val voiceHint = TextView(this).apply {
-            text = "🎤 Voice button screen ke left side par hoga"
-            textSize = 12f
-            setTextColor(Color.LTGRAY)
-            setPadding(8, 6, 8, 6)
-        }
-        container.addView(voiceHint, LinearLayout.LayoutParams(-1, -2))
         val stop = Button(this).apply { text = "Stop Live"; setOnClickListener { stopSelf(); stopService(Intent(this@LiveScreenService, VoiceOverlayService::class.java)) } }
         container.addView(stop, LinearLayout.LayoutParams(-1, -2))
         overlayView = container
