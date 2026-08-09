@@ -127,14 +127,11 @@ def live_token():
         expire_time = (now + datetime.timedelta(minutes=30)).isoformat().replace('+00:00', 'Z')
         new_session_expire_time = (now + datetime.timedelta(minutes=1)).isoformat().replace('+00:00', 'Z')
 
+        # Keep token provisioning minimal. The mobile client locks the Live model/config.
         payload = {
             "uses": 1,
             "expireTime": expire_time,
-            "newSessionExpireTime": new_session_expire_time,
-            "liveConnectConstraints": {
-                "model": f"models/{LIVE_MODEL_NAME}",
-                "config": {"responseModalities": ["TEXT"]}
-            }
+            "newSessionExpireTime": new_session_expire_time
         }
 
         resp = requests.post(
@@ -145,8 +142,8 @@ def live_token():
         )
 
         if resp.status_code != 200:
-            print('Live token error:', resp.text[:500])
-            return jsonify({"error": "Gemini Live token create nahi ho saka."}), 500
+            print('Live token error:', resp.status_code, resp.text[:1000])
+            return jsonify({"error": f"Gemini Live token error ({resp.status_code}): {resp.text[:500]}"}), 500
 
         data = resp.json()
         token = data.get('name')
@@ -157,7 +154,7 @@ def live_token():
 
     except Exception as e:
         print('Live token exception:', repr(e))
-        return jsonify({"error": "Live Screen start nahi ho saka."}), 500
+        return jsonify({"error": f"Live Screen start nahi ho saka: {type(e).__name__}: {e}"}), 500
 
 
 if __name__ == '__main__':
