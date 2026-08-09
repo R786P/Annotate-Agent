@@ -11,10 +11,13 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
 import android.media.Image
 import android.media.ImageReader
-import android.media.projection.MediaProjection
-import android.media.projection.MediaProjectionManager
+import android.media.MediaProjection
+import android.media.MediaProjectionManager
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -50,6 +53,7 @@ class LiveScreenService : Service() {
         private const val NOTIFICATION_ID = 7001
         private const val FRAME_INTERVAL_MS = 1200L
         private const val MAX_FRAME_WIDTH = 720
+        private const val AUDIO_SAMPLE_RATE = 24000
     }
 
     private val httpClient = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
@@ -67,10 +71,12 @@ class LiveScreenService : Service() {
     private var backendUrl = ""
     private var lastFrameAt = 0L
     private var stopped = false
+    private var audioTrack: AudioTrack? = null
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        createAudioTrack()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -99,6 +105,43 @@ class LiveScreenService : Service() {
         startProjection(resultCode, resultData)
         fetchEphemeralTokenAndConnect()
         return START_STICKY
+    }
+
+    private fun createAudioTrack() {
+        try {
+            val minBuffer = AudioTrack.getMinBufferSize(
+                AUDIO_SAMPLE_RATE,
+                AudioFormat.CHANNEL_OUT_MONO,
+                AudioFormat.ENCODING_PCM_16BIT
+            )
+            audioTrack = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setSampleRate(AUDIO_SAMPLE_RATE)
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(maxOf(minBuffer, AUDIO_SAMPLE_RATE * 2))
+                .setTransferMode(AudioTrack.MODE_STREAM)
+                .build()
+            audioTrack?.play()
+        } catch (_: Exception) {
+            audioTrack = null
+        }
+    }
+
+    private fun playAudio(base64Audio: String) {
+        try {
+            val pcm = Base64.decode(base64Audio, Base64.DEFAULT)
+            audioTrack?.write(pcm, 0, pcm.size)
+        } catch (_: Exception) { }
     }
 
     private fun startProjection(resultCode: Int, resultData: Intent) {
@@ -150,17 +193,19 @@ class LiveScreenService : Service() {
             "?access_token=$token"
         webSocket = httpClient.newWebSocket(Request.Builder().url(wsUrl).build(), object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                val setup = JSONObject().put("setup", JSONObject())
-                setup.getJSONObject("setup").put("model", "models/$model")
-                setup.getJSONObject("setup").put("generationConfig", JSONObject()
-                    .put("responseModalities", org.json.JSONArray().put("TEXT"))
+                val setupRoot = JSONObject().put("setup", JSONObject())
+                val setup = setupRoot.getJSONObject("setup")
+                setup.put("model", "models/$model")
+                setup.put("generationConfig", JSONObject()
+                    .put("responseModalities", org.json.JSONArray().put("AUDIO"))
                     .put("temperature", 0.2))
+                setup.put("outputAudioTranscription", JSONObject())
                 val instruction = JSONObject().put("parts", org.json.JSONArray().put(
-                    JSONObject().put("text", "Tum Annotate Agent ho. User ke phone screen ke live frames ko dekho. User Hindi/Hinglish me sawaal kare to concise Hindi/Hinglish me jawab do. Visible buttons, errors, text aur UI ko explain karo. Passwords, OTPs, API keys aur private secrets ko repeat mat karo.")
+                    JSONObject().put("text", "Tum Annotate Agent ho. User ke phone screen ke live frames ko dekho. User Hindi/Hinglish me sawaal kare to concise Hindi/Hinglish me jawab do. Visible buttons, errors, text aur UI ko explain karo. Jawab natural Hindi/Hinglish voice me do. Passwords, OTPs, API keys aur private secrets ko repeat mat karo.")
                 ))
-                setup.getJSONObject("setup").put("systemInstruction", instruction)
-                webSocket.send(setup.toString())
-                showAnswer("🟢 Live connected. Ab bubble ya 🎤 se sawaal poochho.")
+                setup.put("systemInstruction", instruction)
+                webSocket.send(setupRoot.toString())
+                showAnswer("🟢 Live connected. Screen dekh raha hoon. 🎤 se sawaal poochho.")
             }
             override fun onMessage(webSocket: WebSocket, text: String) { parseGeminiMessage(text) }
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { showAnswer("Gemini Live connection error: ${t.message ?: "unknown error"}") }
@@ -172,14 +217,21 @@ class LiveScreenService : Service() {
         try {
             val root = JSONObject(raw)
             val serverContent = root.optJSONObject("serverContent") ?: return
-            val modelTurn = serverContent.optJSONObject("modelTurn") ?: return
-            val parts = modelTurn.optJSONArray("parts") ?: return
-            val answer = StringBuilder()
-            for (i in 0 until parts.length()) {
-                val text = parts.optJSONObject(i)?.optString("text", "") ?: ""
-                if (text.isNotBlank()) answer.append(text)
+            val modelTurn = serverContent.optJSONObject("modelTurn")
+            val parts = modelTurn?.optJSONArray("parts")
+            if (parts != null) {
+                for (i in 0 until parts.length()) {
+                    val part = parts.optJSONObject(i) ?: continue
+                    val inlineData = part.optJSONObject("inlineData") ?: part.optJSONObject("inline_data")
+                    val audio = inlineData?.optString("data", "").orEmpty()
+                    if (audio.isNotBlank()) playAudio(audio)
+                    val text = part.optString("text", "")
+                    if (text.isNotBlank()) showAnswer(text)
+                }
             }
-            if (answer.isNotBlank()) showAnswer(answer.toString())
+            val outputTranscription = serverContent.optJSONObject("outputTranscription")
+            val transcript = outputTranscription?.optString("text", "").orEmpty()
+            if (transcript.isNotBlank()) showAnswer(transcript)
         } catch (_: Exception) { }
     }
 
@@ -265,8 +317,7 @@ class LiveScreenService : Service() {
     private fun showAnswer(text: String) { Handler(mainLooper).post { answerView?.text = text } }
 
     private fun buildNotification(): Notification = Notification.Builder(this, CHANNEL_ID)
-        .setContentTitle("Annotate Agent Live").setContentText("Screen live analysis active")
-        .setSmallIcon(android.R.drawable.ic_menu_view).setOngoing(true).build()
+        .setContentTitle("Annotate Agent Live").setContentText("Screen live analysis active").setSmallIcon(android.R.drawable.ic_menu_view).setOngoing(true).build()
 
     private fun createNotificationChannel() {
         getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL_ID, "Annotate Agent Live Screen", NotificationManager.IMPORTANCE_LOW))
@@ -276,6 +327,8 @@ class LiveScreenService : Service() {
         stopped = true
         webSocket?.close(1000, "User stopped Live Screen")
         webSocket = null
+        try { audioTrack?.stop() } catch (_: Exception) { }
+        audioTrack?.release(); audioTrack = null
         virtualDisplay?.release(); virtualDisplay = null
         imageReader?.close(); imageReader = null
         mediaProjection?.stop(); mediaProjection = null
