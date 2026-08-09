@@ -3,6 +3,7 @@ import json
 import base64
 import mimetypes
 import requests
+import datetime
 from flask import Flask, render_template, request, jsonify
 from werkzeug.utils import secure_filename
 
@@ -14,6 +15,7 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
 MODEL_NAME = os.environ.get('GEMINI_MODEL', 'gemini-3.6-flash')
 GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{MODEL_NAME}:generateContent"
+LIVE_MODEL_NAME = os.environ.get('GEMINI_LIVE_MODEL', 'gemini-3.1-flash-live-preview')
 
 
 def format_ts(sec):
@@ -112,6 +114,50 @@ def analyze():
     finally:
         if video_path and os.path.exists(video_path):
             os.remove(video_path)
+
+
+# NEW: Live Screen authentication endpoint. Existing /analyze flow is unchanged.
+@app.route('/live-token', methods=['POST'])
+def live_token():
+    if not GEMINI_API_KEY:
+        return jsonify({"error": "GEMINI_API_KEY set nahi hai Render environment variables me."}), 500
+
+    try:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        expire_time = (now + datetime.timedelta(minutes=30)).isoformat().replace('+00:00', 'Z')
+        new_session_expire_time = (now + datetime.timedelta(minutes=1)).isoformat().replace('+00:00', 'Z')
+
+        payload = {
+            "uses": 1,
+            "expireTime": expire_time,
+            "newSessionExpireTime": new_session_expire_time,
+            "liveConnectConstraints": {
+                "model": f"models/{LIVE_MODEL_NAME}",
+                "config": {"responseModalities": ["TEXT"]}
+            }
+        }
+
+        resp = requests.post(
+            'https://generativelanguage.googleapis.com/v1beta/auth_tokens',
+            headers={'x-goog-api-key': GEMINI_API_KEY, 'Content-Type': 'application/json'},
+            json=payload,
+            timeout=20
+        )
+
+        if resp.status_code != 200:
+            print('Live token error:', resp.text[:500])
+            return jsonify({"error": "Gemini Live token create nahi ho saka."}), 500
+
+        data = resp.json()
+        token = data.get('name')
+        if not token:
+            return jsonify({"error": "Gemini Live token response invalid hai."}), 500
+
+        return jsonify({"token": token, "model": LIVE_MODEL_NAME})
+
+    except Exception as e:
+        print('Live token exception:', repr(e))
+        return jsonify({"error": "Live Screen start nahi ho saka."}), 500
 
 
 if __name__ == '__main__':
