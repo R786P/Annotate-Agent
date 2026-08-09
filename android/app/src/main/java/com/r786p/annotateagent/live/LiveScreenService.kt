@@ -16,8 +16,8 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import android.media.Image
 import android.media.ImageReader
-import android.media.MediaProjection
-import android.media.MediaProjectionManager
+import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
@@ -109,32 +109,15 @@ class LiveScreenService : Service() {
 
     private fun createAudioTrack() {
         try {
-            val minBuffer = AudioTrack.getMinBufferSize(
-                AUDIO_SAMPLE_RATE,
-                AudioFormat.CHANNEL_OUT_MONO,
-                AudioFormat.ENCODING_PCM_16BIT
-            )
+            val minBuffer = AudioTrack.getMinBufferSize(AUDIO_SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
             audioTrack = AudioTrack.Builder()
-                .setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ASSISTANT)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                        .build()
-                )
-                .setAudioFormat(
-                    AudioFormat.Builder()
-                        .setSampleRate(AUDIO_SAMPLE_RATE)
-                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                        .build()
-                )
+                .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                .setAudioFormat(AudioFormat.Builder().setSampleRate(AUDIO_SAMPLE_RATE).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
                 .setBufferSizeInBytes(maxOf(minBuffer, AUDIO_SAMPLE_RATE * 2))
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
             audioTrack?.play()
-        } catch (_: Exception) {
-            audioTrack = null
-        }
+        } catch (_: Exception) { audioTrack = null }
     }
 
     private fun playAudio(base64Audio: String) {
@@ -188,21 +171,15 @@ class LiveScreenService : Service() {
     }
 
     private fun connectGemini(token: String, model: String) {
-        val wsUrl = "wss://generativelanguage.googleapis.com/ws/" +
-            "google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained" +
-            "?access_token=$token"
+        val wsUrl = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained?access_token=$token"
         webSocket = httpClient.newWebSocket(Request.Builder().url(wsUrl).build(), object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 val setupRoot = JSONObject().put("setup", JSONObject())
                 val setup = setupRoot.getJSONObject("setup")
                 setup.put("model", "models/$model")
-                setup.put("generationConfig", JSONObject()
-                    .put("responseModalities", org.json.JSONArray().put("AUDIO"))
-                    .put("temperature", 0.2))
+                setup.put("generationConfig", JSONObject().put("responseModalities", org.json.JSONArray().put("AUDIO")).put("temperature", 0.2))
                 setup.put("outputAudioTranscription", JSONObject())
-                val instruction = JSONObject().put("parts", org.json.JSONArray().put(
-                    JSONObject().put("text", "Tum Annotate Agent ho. User ke phone screen ke live frames ko dekho. User Hindi/Hinglish me sawaal kare to concise Hindi/Hinglish me jawab do. Visible buttons, errors, text aur UI ko explain karo. Jawab natural Hindi/Hinglish voice me do. Passwords, OTPs, API keys aur private secrets ko repeat mat karo.")
-                ))
+                val instruction = JSONObject().put("parts", org.json.JSONArray().put(JSONObject().put("text", "Tum Annotate Agent ho. User ke phone screen ke live frames ko dekho. User Hindi/Hinglish me sawaal kare to concise Hindi/Hinglish me jawab do. Visible buttons, errors, text aur UI ko explain karo. Jawab natural Hindi/Hinglish voice me do. Passwords, OTPs, API keys aur private secrets ko repeat mat karo.")))
                 setup.put("systemInstruction", instruction)
                 webSocket.send(setupRoot.toString())
                 showAnswer("🟢 Live connected. Screen dekh raha hoon. 🎤 se sawaal poochho.")
@@ -249,9 +226,7 @@ class LiveScreenService : Service() {
             val bitmap = Bitmap.createBitmap(paddedWidth, image.height, Bitmap.Config.ARGB_8888)
             bitmap.copyPixelsFromBuffer(buffer)
             val cropped = if (paddedWidth != image.width) Bitmap.createBitmap(bitmap, 0, 0, image.width, image.height) else bitmap
-            val scaled = if (cropped.width > MAX_FRAME_WIDTH) {
-                Bitmap.createScaledBitmap(cropped, MAX_FRAME_WIDTH, cropped.height * MAX_FRAME_WIDTH / cropped.width, true)
-            } else cropped
+            val scaled = if (cropped.width > MAX_FRAME_WIDTH) Bitmap.createScaledBitmap(cropped, MAX_FRAME_WIDTH, cropped.height * MAX_FRAME_WIDTH / cropped.width, true) else cropped
             val output = ByteArrayOutputStream()
             scaled.compress(Bitmap.CompressFormat.JPEG, 55, output)
             val encoded = Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
@@ -259,53 +234,33 @@ class LiveScreenService : Service() {
             if (scaled !== cropped) scaled.recycle()
             if (cropped !== bitmap) cropped.recycle()
             bitmap.recycle()
-        } catch (_: Exception) {
-        } finally { image.close() }
+        } catch (_: Exception) { } finally { image.close() }
     }
 
     private fun showOverlay() {
         if (overlayView != null) return
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         bubble = TextView(this).apply {
-            text = "🤖"
-            textSize = 22f
-            gravity = Gravity.CENTER
-            setTextColor(Color.WHITE)
-            setBackgroundColor(Color.rgb(91, 91, 247))
-            setPadding(14, 10, 14, 10)
-            setOnClickListener { togglePanel() }
+            text = "🤖"; textSize = 22f; gravity = Gravity.CENTER; setTextColor(Color.WHITE); setBackgroundColor(Color.rgb(91, 91, 247)); setPadding(14, 10, 14, 10); setOnClickListener { togglePanel() }
         }
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(12, 12, 12, 12)
-            setBackgroundColor(Color.rgb(25, 25, 28))
-        }
+        val container = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(12, 12, 12, 12); setBackgroundColor(Color.rgb(25, 25, 28)) }
         answerView = TextView(this).apply { text = "Live screen active"; textSize = 14f; setTextColor(Color.WHITE); setPadding(10, 10, 10, 10) }
         container.addView(answerView, LinearLayout.LayoutParams(-1, 0, 1f))
         questionInput = EditText(this).apply { hint = "Kya poochna hai?"; setTextColor(Color.WHITE); setHintTextColor(Color.LTGRAY); setSingleLine(false) }
         container.addView(questionInput, LinearLayout.LayoutParams(-1, -2))
-        val ask = Button(this).apply {
-            text = "Ask"
-            setOnClickListener { val q = questionInput?.text?.toString()?.trim().orEmpty(); if (q.isNotBlank()) { sendText(q); questionInput?.setText("") } }
-        }
+        val ask = Button(this).apply { text = "Ask"; setOnClickListener { val q = questionInput?.text?.toString()?.trim().orEmpty(); if (q.isNotBlank()) { sendText(q); questionInput?.setText("") } } }
         container.addView(ask, LinearLayout.LayoutParams(-1, -2))
         val stop = Button(this).apply { text = "Stop Live"; setOnClickListener { stopSelf(); stopService(Intent(this@LiveScreenService, VoiceOverlayService::class.java)) } }
         container.addView(stop, LinearLayout.LayoutParams(-1, -2))
         overlayView = container
-        val bubbleParams = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
-            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT).apply {
-            gravity = Gravity.CENTER_VERTICAL or Gravity.END; x = 18; y = 0
-        }
+        val bubbleParams = WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT, if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.CENTER_VERTICAL or Gravity.END; x = 18; y = 0 }
         windowManager?.addView(bubble, bubbleParams)
     }
 
     private fun togglePanel() {
         val current = overlayView ?: return
         if (current.parent != null) { windowManager?.removeView(current); return }
-        val params = WindowManager.LayoutParams((resources.displayMetrics.widthPixels * 0.82).toInt(), WindowManager.LayoutParams.WRAP_CONTENT,
-            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.CENTER }
+        val params = WindowManager.LayoutParams((resources.displayMetrics.widthPixels * 0.82).toInt(), WindowManager.LayoutParams.WRAP_CONTENT, if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE, WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT).apply { gravity = Gravity.CENTER }
         windowManager?.addView(current, params)
     }
 
@@ -316,27 +271,20 @@ class LiveScreenService : Service() {
 
     private fun showAnswer(text: String) { Handler(mainLooper).post { answerView?.text = text } }
 
-    private fun buildNotification(): Notification = Notification.Builder(this, CHANNEL_ID)
-        .setContentTitle("Annotate Agent Live").setContentText("Screen live analysis active").setSmallIcon(android.R.drawable.ic_menu_view).setOngoing(true).build()
+    private fun buildNotification(): Notification = Notification.Builder(this, CHANNEL_ID).setContentTitle("Annotate Agent Live").setContentText("Screen live analysis active").setSmallIcon(android.R.drawable.ic_menu_view).setOngoing(true).build()
 
-    private fun createNotificationChannel() {
-        getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL_ID, "Annotate Agent Live Screen", NotificationManager.IMPORTANCE_LOW))
-    }
+    private fun createNotificationChannel() { getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL_ID, "Annotate Agent Live Screen", NotificationManager.IMPORTANCE_LOW)) }
 
     override fun onDestroy() {
         stopped = true
-        webSocket?.close(1000, "User stopped Live Screen")
-        webSocket = null
+        webSocket?.close(1000, "User stopped Live Screen"); webSocket = null
         try { audioTrack?.stop() } catch (_: Exception) { }
         audioTrack?.release(); audioTrack = null
         virtualDisplay?.release(); virtualDisplay = null
         imageReader?.close(); imageReader = null
         mediaProjection?.stop(); mediaProjection = null
         captureThread?.quitSafely(); captureThread = null; captureHandler = null
-        try {
-            overlayView?.let { if (it.parent != null) windowManager?.removeView(it) }
-            bubble?.let { if (it.parent != null) windowManager?.removeView(it) }
-        } catch (_: Exception) { }
+        try { overlayView?.let { if (it.parent != null) windowManager?.removeView(it) }; bubble?.let { if (it.parent != null) windowManager?.removeView(it) } } catch (_: Exception) { }
         overlayView = null; bubble = null
         stopForeground(STOP_FOREGROUND_REMOVE)
         super.onDestroy()
