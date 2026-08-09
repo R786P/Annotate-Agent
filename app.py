@@ -116,7 +116,7 @@ def analyze():
             os.remove(video_path)
 
 
-# NEW: Live Screen authentication endpoint. Existing /analyze flow is unchanged.
+# Live Screen authentication endpoint. Existing /analyze flow is unchanged.
 @app.route('/live-token', methods=['POST'])
 def live_token():
     if not GEMINI_API_KEY:
@@ -127,13 +127,18 @@ def live_token():
         expire_time = (now + datetime.timedelta(minutes=30)).isoformat().replace('+00:00', 'Z')
         new_session_expire_time = (now + datetime.timedelta(minutes=1)).isoformat().replace('+00:00', 'Z')
 
+        # The token is constrained to the same Live model and AUDIO output used by
+        # the Android client. This keeps the long-lived API key on the server.
         payload = {
             "uses": 1,
             "expireTime": expire_time,
             "newSessionExpireTime": new_session_expire_time,
             "liveConnectConstraints": {
                 "model": f"models/{LIVE_MODEL_NAME}",
-                "config": {"responseModalities": ["TEXT"]}
+                "config": {
+                    "responseModalities": ["AUDIO"],
+                    "outputAudioTranscription": {}
+                }
             }
         }
 
