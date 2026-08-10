@@ -12,10 +12,14 @@ panel_new = '''    private fun buildPanel() {
             setBackgroundColor(Color.TRANSPARENT)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
-            settings.allowFileAccess = false
+            settings.allowFileAccess = true
+            settings.allowContentAccess = false
+            overScrollMode = View.OVER_SCROLL_NEVER
             webViewClient = WebViewClient()
             addJavascriptInterface(PandaWebBridge(), "NativeBridge")
-            loadUrl("$backendUrl/static/mobile_panel.html")
+            // Keep the Panda UI inside the APK. Render is only the Gemini/backend,
+            // so a sleeping/offline Render web page cannot make the chat window blank.
+            loadUrl("file:///android_asset/mobile_panel.html")
         }
         chatWebView = web
         overlayView = LinearLayout(this).apply {
@@ -59,7 +63,6 @@ panel_new = '''    private fun buildPanel() {
 s, count = panel_re.subn(panel_new, s, count=1)
 if count != 1: raise SystemExit("buildPanel block not found")
 
-# Keep the chat window bounded and let touches outside the panel reach the phone underneath.
 toggle_re = re.compile(r'    private fun togglePanel\(\) \{.*?\n    \}\n\n    private fun buildPanel', re.S)
 toggle_new = '''    private fun togglePanel() {
         val current = overlayView
@@ -71,7 +74,7 @@ toggle_new = '''    private fun togglePanel() {
         val panel = overlayView ?: return
         val panelHeight = (resources.displayMetrics.heightPixels * 0.70f).toInt()
         val params = WindowManager.LayoutParams(
-            (resources.displayMetrics.widthPixels * 0.84).toInt(),
+            (resources.displayMetrics.widthPixels * 0.88f).toInt(),
             panelHeight,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
@@ -95,4 +98,4 @@ show_new = '''    private fun showAnswer(text: String) {
 s, count = show_re.subn(show_new, s, count=1)
 if count != 1: raise SystemExit("showAnswer block not found")
 path.write_text(s)
-print("Panda panel bounded; outside touches pass through")
+print("Panda panel uses local APK asset; larger bounded touchable window")
