@@ -4,11 +4,7 @@ import re
 path = Path("android/app/src/main/java/com/r786p/annotateagent/live/LiveScreenService.kt")
 s = path.read_text()
 
-# -----------------------------------------------------------------------------
-# Panda overlay: keep the existing working bubble, but make it draggable and
-# edge-hideable. The patch is intentionally idempotent because Actions runs it
-# on every build.
-# -----------------------------------------------------------------------------
+# Panda overlay: draggable + edge hide/restore.
 if "bubbleParams: WindowManager.LayoutParams" not in s:
     s = s.replace(
         "private var bubble: PandaBubbleView? = null",
@@ -16,24 +12,8 @@ if "bubbleParams: WindowManager.LayoutParams" not in s:
         1,
     )
 
-if "setOnDragListener" not in s:
-    old_show = '''    private fun showOverlay() {
-        if (bubble != null) return
-        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
-        bubble = PandaBubbleView(this).apply {
-            setOnBubbleClickListener { togglePanel() }
-            setOnMicClickListener { startVoiceInput() }
-        }
-        val params = WindowManager.LayoutParams(
-            88, 88,
-            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.CENTER_VERTICAL or Gravity.END; x = 12; y = 0 }
-        try { windowManager?.addView(bubble, params) } catch (_: Exception) { stopSelf() }
-    }
-'''
-    new_show = '''    private fun showOverlay() {
+show_re = re.compile(r"    private fun showOverlay\(\) \{.*?\n    \}\n\n    private fun togglePanel", re.S)
+show_new = '''    private fun showOverlay() {
         if (bubble != null) return
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         bubble = PandaBubbleView(this).apply {
@@ -44,14 +24,16 @@ if "setOnDragListener" not in s:
             setOnRestoreListener { restoreBubbleFromEdge() }
         }
         val dm = resources.displayMetrics
-        val initialX = (dm.widthPixels - 100).coerceAtLeast(0)
-        val initialY = ((dm.heightPixels - 88) / 2).coerceAtLeast(0)
         val params = WindowManager.LayoutParams(
             88, 88,
             if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
-        ).apply { gravity = Gravity.TOP or Gravity.START; x = initialX; y = initialY }
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = (dm.widthPixels - 100).coerceAtLeast(0)
+            y = ((dm.heightPixels - 88) / 2).coerceAtLeast(0)
+        }
         bubbleParams = params
         try { windowManager?.addView(bubble, params) } catch (_: Exception) { stopSelf() }
     }
@@ -59,10 +41,8 @@ if "setOnDragListener" not in s:
     private fun moveBubble(dx: Float, dy: Float) {
         val params = bubbleParams ?: return
         val dm = resources.displayMetrics
-        val maxX = (dm.widthPixels - 88).coerceAtLeast(0)
-        val maxY = (dm.heightPixels - 88).coerceAtLeast(0)
-        params.x = (params.x + dx.toInt()).coerceIn(0, maxX)
-        params.y = (params.y + dy.toInt()).coerceIn(0, maxY)
+        params.x = (params.x + dx.toInt()).coerceIn(0, (dm.widthPixels - 88).coerceAtLeast(0))
+        params.y = (params.y + dy.toInt()).coerceIn(0, (dm.heightPixels - 88).coerceAtLeast(0))
         try { windowManager?.updateViewLayout(bubble, params) } catch (_: Exception) { }
     }
 
@@ -79,43 +59,98 @@ if "setOnDragListener" not in s:
         params.x = if (params.x < 0) 12 else (dm.widthPixels - 100).coerceAtLeast(0)
         try { windowManager?.updateViewLayout(bubble, params) } catch (_: Exception) { }
     }
-'''
-    if old_show not in s:
-        raise SystemExit("showOverlay block not found")
-    s = s.replace(old_show, new_show, 1)
 
-    fields = '''        private var onMicClick: (() -> Unit)? = null
-        private var downX = 0f
-        private var downY = 0f'''
-    fields_new = '''        private var onMicClick: (() -> Unit)? = null
-        private var onDrag: ((Float, Float) -> Unit)? = null
-        private var onEdgeHide: ((Boolean) -> Unit)? = null
-        private var onRestore: (() -> Unit)? = null
-        private var downX = 0f
-        private var downY = 0f
-        private var lastX = 0f
-        private var lastY = 0f
-        private var dragging = false
-        private var edgeHidden = false'''
-    if fields not in s:
-        raise SystemExit("bubble fields not found")
-    s = s.replace(fields, fields_new, 1)
+    private fun togglePanel'''
+s, count = show_re.subn(show_new, s, count=1)
+if count != 1:
+    raise SystemExit("showOverlay block not found")
 
-    listeners = '''        fun setOnBubbleClickListener(listener: () -> Unit) { onBubbleClick = listener }
-        fun setOnMicClickListener(listener: () -> Unit) { onMicClick = listener }
-        fun setListening(value: Boolean) { listening = value; invalidate() }'''
-    listeners_new = '''        fun setOnBubbleClickListener(listener: () -> Unit) { onBubbleClick = listener }
-        fun setOnMicClickListener(listener: () -> Unit) { onMicClick = listener }
-        fun setOnDragListener(listener: (Float, Float) -> Unit) { onDrag = listener }
-        fun setOnEdgeHideListener(listener: (Boolean) -> Unit) { onEdgeHide = listener }
-        fun setOnRestoreListener(listener: () -> Unit) { onRestore = listener }
-        fun setListening(value: Boolean) { listening = value; invalidate() }'''
-    if listeners not in s:
-        raise SystemExit("bubble listeners not found")
-    s = s.replace(listeners, listeners_new, 1)
+# Gemini Live readiness state.
+if "private var liveReady = false" not in s:
+    s = s.replace(
+        "private var listening = false",
+        "private var listening = false\n    private var liveReady = false",
+        1,
+    )
 
-    touch_re = re.compile(r"        override fun onTouchEvent\(event: MotionEvent\): Boolean \{.*?        \}\n\n        override fun onDraw", re.S)
-    touch_new = '''        override fun onTouchEvent(event: MotionEvent): Boolean {
+s = s.replace(
+    "override fun onOpen(webSocket: WebSocket, response: Response) {",
+    "override fun onOpen(webSocket: WebSocket, response: Response) {\n                liveReady = false",
+    1,
+)
+
+old_callbacks = '''            override fun onMessage(webSocket: WebSocket, text: String) { parseGeminiMessage(text) }
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { showAnswer("Gemini Live connection error: ${t.message ?: "unknown error"}") }
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { showAnswer("Live connection closed.") }'''
+new_callbacks = '''            override fun onMessage(webSocket: WebSocket, text: String) {
+                try {
+                    val root = JSONObject(text)
+                    if (root.has("setupComplete")) {
+                        liveReady = true
+                        showAnswer("🟢 Live connected. Screen dekh raha hoon. Panda bubble par 🎙️ dabakar bolo ya bubble tap karke chat kholo.")
+                        return
+                    }
+                } catch (_: Exception) { }
+                parseGeminiMessage(text)
+            }
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                liveReady = false
+                showAnswer("Gemini Live connection error: ${t.message ?: "unknown error"}")
+            }
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                liveReady = false
+                showAnswer("Live connection closed.")
+            }'''
+if old_callbacks not in s:
+    raise SystemExit("websocket callbacks block not found")
+s = s.replace(old_callbacks, new_callbacks, 1)
+
+s = s.replace(
+    "if (now - lastFrameAt < FRAME_INTERVAL_MS || webSocket == null) return",
+    "if (now - lastFrameAt < FRAME_INTERVAL_MS || webSocket == null || !liveReady) return",
+    1,
+)
+
+# Text input must not be generated with a literal newline inside a Kotlin string.
+send_re = re.compile(r"    private fun sendText\(question: String\) \{.*?\n    \}\n\n    private fun showAnswer", re.S)
+send_new = '''    private fun sendText(question: String) {
+        val socket = webSocket
+        if (socket == null || !liveReady) {
+            showAnswer("🔴 Live connection abhi ready nahi hai. 1–2 second rukkar dobara Send karo.")
+            return
+        }
+        val message = JSONObject().put("realtimeInput", JSONObject().put("text", question))
+        if (socket.send(message.toString())) {
+            showAnswer("You: $question" + "\\n\\n" + "⏳ Soch raha hoon...")
+        } else {
+            showAnswer("🔴 Message send nahi hua. Live connection dobara start karo.")
+        }
+    }
+
+    private fun showAnswer'''
+s, count = send_re.subn(send_new, s, count=1)
+if count != 1:
+    raise SystemExit("sendText function not found")
+
+# PandaBubbleView callbacks/state.
+s = s.replace(
+    "private var onMicClick: (() -> Unit)? = null\n        private var downX = 0f",
+    "private var onMicClick: (() -> Unit)? = null\n        private var onDrag: ((Float, Float) -> Unit)? = null\n        private var onEdgeHide: ((Boolean) -> Unit)? = null\n        private var onRestore: (() -> Unit)? = null\n        private var downX = 0f",
+    1,
+)
+s = s.replace(
+    "private var downY = 0f",
+    "private var downY = 0f\n        private var lastX = 0f\n        private var lastY = 0f\n        private var dragging = false\n        private var edgeHidden = false",
+    1,
+)
+s = s.replace(
+    "fun setOnMicClickListener(listener: () -> Unit) { onMicClick = listener }\n        fun setListening(value: Boolean)",
+    "fun setOnMicClickListener(listener: () -> Unit) { onMicClick = listener }\n        fun setOnDragListener(listener: (Float, Float) -> Unit) { onDrag = listener }\n        fun setOnEdgeHideListener(listener: (Boolean) -> Unit) { onEdgeHide = listener }\n        fun setOnRestoreListener(listener: () -> Unit) { onRestore = listener }\n        fun setListening(value: Boolean)",
+    1,
+)
+
+touch_re = re.compile(r"        override fun onTouchEvent\(event: MotionEvent\): Boolean \{.*?        \}\n\n        override fun onDraw", re.S)
+touch_new = '''        override fun onTouchEvent(event: MotionEvent): Boolean {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downX = event.rawX; downY = event.rawY
@@ -159,88 +194,12 @@ if "setOnDragListener" not in s:
         }
 
         override fun onDraw'''
-    s, count = touch_re.subn(touch_new, s, count=1)
-    if count != 1:
-        raise SystemExit("touch handler not found")
-
-# -----------------------------------------------------------------------------
-# Gemini 3.1 Flash Live: after setup, normal user text must be sent through
-# realtimeInput.text. clientContent is reserved for initial history on 3.1.
-# -----------------------------------------------------------------------------
-if "private var liveReady = false" not in s:
-    s = s.replace(
-        "private var listening = false",
-        "private var listening = false\n    private var liveReady = false",
-        1,
-    )
-
-# Reset readiness on socket open and mark it only after setupComplete arrives.
-if "liveReady = false" not in s:
-    s = s.replace(
-        "override fun onOpen(webSocket: WebSocket, response: Response) {",
-        "override fun onOpen(webSocket: WebSocket, response: Response) {\n                liveReady = false",
-        1,
-    )
-
-if "root.has(\"setupComplete\")" not in s:
-    old_callbacks = '''            override fun onMessage(webSocket: WebSocket, text: String) { parseGeminiMessage(text) }
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { showAnswer("Gemini Live connection error: ${t.message ?: "unknown error"}") }
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { showAnswer("Live connection closed.") }'''
-    new_callbacks = '''            override fun onMessage(webSocket: WebSocket, text: String) {
-                try {
-                    val root = JSONObject(text)
-                    if (root.has("setupComplete")) {
-                        liveReady = true
-                        showAnswer("🟢 Live connected. Screen dekh raha hoon. Panda bubble par 🎙️ dabakar bolo ya bubble tap karke chat kholo.")
-                        return
-                    }
-                } catch (_: Exception) { }
-                parseGeminiMessage(text)
-            }
-            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                liveReady = false
-                showAnswer("Gemini Live connection error: ${t.message ?: "unknown error"}")
-            }
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                liveReady = false
-                showAnswer("Live connection closed.")
-            }'''
-    if old_callbacks not in s:
-        raise SystemExit("websocket callbacks block not found")
-    s = s.replace(old_callbacks, new_callbacks, 1)
-
-# Do not stream screen frames before the Live setup is acknowledged.
-s = s.replace(
-    "if (now - lastFrameAt < FRAME_INTERVAL_MS || webSocket == null) return",
-    "if (now - lastFrameAt < FRAME_INTERVAL_MS || webSocket == null || !liveReady) return",
-    1,
-)
-
-# Replace whatever sendText implementation is currently present. Regex makes
-# this resilient to harmless formatting changes in the Kotlin file.
-send_re = re.compile(r"    private fun sendText\(question: String\) \{.*?\n    \}\n\n    private fun showAnswer", re.S)
-new_send = '''    private fun sendText(question: String) {
-        val socket = webSocket
-        if (socket == null || !liveReady) {
-            showAnswer("🔴 Live connection abhi ready nahi hai. 1–2 second rukkar dobara Send karo.")
-            return
-        }
-        val message = JSONObject()
-            .put("realtimeInput", JSONObject().put("text", question))
-        if (socket.send(message.toString())) {
-            showAnswer("You: $question\\n\\n⏳ Soch raha hoon...")
-        } else {
-            showAnswer("🔴 Message send nahi hua. Live connection dobara start karo.")
-        }
-    }
-
-    private fun showAnswer'''
-s, count = send_re.subn(new_send, s, count=1)
+s, count = touch_re.subn(touch_new, s, count=1)
 if count != 1:
-    raise SystemExit("sendText function not found")
+    raise SystemExit("touch handler not found")
 
 s = s.replace("overlayView = null; bubble = null", "overlayView = null; bubble = null; bubbleParams = null", 1)
 s = s.replace("webSocket?.close(1000, \"User stopped Live Screen\"); webSocket = null", "webSocket?.close(1000, \"User stopped Live Screen\"); webSocket = null; liveReady = false", 1)
 
 path.write_text(s)
-print("Panda overlay + Gemini Live text protocol patch applied")
+print("Panda overlay + Gemini Live patch applied")
