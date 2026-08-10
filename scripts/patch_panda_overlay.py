@@ -4,6 +4,7 @@ import re
 path = Path("android/app/src/main/java/com/r786p/annotateagent/live/LiveScreenService.kt")
 s = path.read_text()
 
+# Keep the already-working draggable/edge-hide overlay behavior.
 if "bubbleParams: WindowManager.LayoutParams" not in s:
     s = s.replace(
         "private var bubble: PandaBubbleView? = null",
@@ -158,7 +159,103 @@ if "setOnDragListener" not in s:
     if count != 1:
         raise SystemExit("touch handler not found")
 
-    s = s.replace("overlayView = null; bubble = null", "overlayView = null; bubble = null; bubbleParams = null", 1)
-    path.write_text(s)
+# Gemini 3.1 Flash Live does not use clientContent for normal turns after the
+# initial setup/history. Text questions must go through realtimeInput.text.
+# Also wait for setupComplete before allowing the first user message.
+if "private var liveReady = false" not in s:
+    s = s.replace(
+        "private var listening = false",
+        "private var listening = false\n    private var liveReady = false",
+        1,
+    )
 
-print("Panda overlay patch applied")
+if "setupComplete" not in s:
+    s = s.replace(
+        '''            override fun onOpen(webSocket: WebSocket, response: Response) {
+                val setupRoot = JSONObject().put("setup", JSONObject())''',
+        '''            override fun onOpen(webSocket: WebSocket, response: Response) {
+                liveReady = false
+                val setupRoot = JSONObject().put("setup", JSONObject())''',
+        1,
+    )
+
+s = s.replace(
+    '''            override fun onMessage(webSocket: WebSocket, text: String) { parseGeminiMessage(text) }
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { showAnswer("Gemini Live connection error: ${t.message ?: "unknown error"}") }
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { showAnswer("Live connection closed.") }''',
+    '''            override fun onMessage(webSocket: WebSocket, text: String) {
+                try {
+                    val root = JSONObject(text)
+                    if (root.has("setupComplete")) {
+                        liveReady = true
+                        showAnswer("🟢 Live connected. Screen dekh raha hoon. Panda bubble par 🎙️ dabakar bolo ya bubble tap karke chat kholo.")
+                        return
+                    }
+                } catch (_: Exception) { }
+                parseGeminiMessage(text)
+            }
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                liveReady = false
+                showAnswer("Gemini Live connection error: ${t.message ?: "unknown error"}")
+            }
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                liveReady = false
+                showAnswer("Live connection closed.")
+            }''',
+    1,
+)
+
+s = s.replace(
+    "if (now - lastFrameAt < FRAME_INTERVAL_MS || webSocket == null) return",
+    "if (now - lastFrameAt < FRAME_INTERVAL_MS || !liveReady) return",
+    1,
+)
+
+old_send = '''    private fun sendText(question: String) {
+        val socket = webSocket
+        if (socket == null) {
+            showAnswer("🔴 Live connection ready nahi hai. Panda ko restart karke dobara try karo.")
+            return
+        }
+        val message = JSONObject()
+            .put("clientContent", JSONObject()
+                .put("turns", JSONArray().put(
+                    JSONObject()
+                        .put("role", "user")
+                        .put("parts", JSONArray().put(JSONObject().put("text", question)))
+                ))
+                .put("turnComplete", true)
+            )
+        if (socket.send(message.toString())) {
+            showAnswer("You: $question\n\n⏳ Soch raha hoon...")
+        } else {
+            showAnswer("🔴 Message send nahi hua. Live connection dobara start karo.")
+        }
+    }
+'''
+new_send = '''    private fun sendText(question: String) {
+        val socket = webSocket
+        if (socket == null || !liveReady) {
+            showAnswer("🔴 Live connection abhi ready nahi hai. 1–2 second rukkar dobara Send karo.")
+            return
+        }
+        // Gemini 3.1 Flash Live accepts normal post-setup text turns via
+        // realtimeInput.text. clientContent is reserved for initial history.
+        val message = JSONObject()
+            .put("realtimeInput", JSONObject().put("text", question))
+        if (socket.send(message.toString())) {
+            showAnswer("You: $question\n\n⏳ Soch raha hoon...")
+        } else {
+            showAnswer("🔴 Message send nahi hua. Live connection dobara start karo.")
+        }
+    }
+'''
+if old_send not in s:
+    raise SystemExit("sendText block not found")
+s = s.replace(old_send, new_send, 1)
+
+s = s.replace("overlayView = null; bubble = null", "overlayView = null; bubble = null; bubbleParams = null", 1)
+s = s.replace("webSocket?.close(1000, \"User stopped Live Screen\"); webSocket = null", "webSocket?.close(1000, \"User stopped Live Screen\"); webSocket = null; liveReady = false", 1)
+
+path.write_text(s)
+print("Panda overlay + Gemini Live text protocol patch applied")
