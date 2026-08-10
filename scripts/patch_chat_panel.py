@@ -58,6 +58,32 @@ panel_new = '''    private fun buildPanel() {
     private fun startVoiceInput'''
 s, count = panel_re.subn(panel_new, s, count=1)
 if count != 1: raise SystemExit("buildPanel block not found")
+
+# Keep the chat window bounded and let touches outside the panel reach the phone underneath.
+toggle_re = re.compile(r'    private fun togglePanel\(\) \{.*?\n    \}\n\n    private fun buildPanel', re.S)
+toggle_new = '''    private fun togglePanel() {
+        val current = overlayView
+        if (current?.parent != null) {
+            windowManager?.removeView(current)
+            return
+        }
+        if (current == null) buildPanel()
+        val panel = overlayView ?: return
+        val panelHeight = (resources.displayMetrics.heightPixels * 0.70f).toInt()
+        val params = WindowManager.LayoutParams(
+            (resources.displayMetrics.widthPixels * 0.84).toInt(),
+            panelHeight,
+            if (Build.VERSION.SDK_INT >= 26) WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY else WindowManager.LayoutParams.TYPE_PHONE,
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        ).apply { gravity = Gravity.CENTER }
+        try { windowManager?.addView(panel, params) } catch (_: Exception) { }
+    }
+
+    private fun buildPanel'''
+s, count = toggle_re.subn(toggle_new, s, count=1)
+if count != 1: raise SystemExit("togglePanel block not found")
+
 show_re = re.compile(r'    private fun showAnswer\(text: String\) \{.*?\n    \}\n', re.S)
 show_new = '''    private fun showAnswer(text: String) {
         Handler(mainLooper).post {
@@ -69,4 +95,4 @@ show_new = '''    private fun showAnswer(text: String) {
 s, count = show_re.subn(show_new, s, count=1)
 if count != 1: raise SystemExit("showAnswer block not found")
 path.write_text(s)
-print("Panda panel now uses Render-hosted mobile UI")
+print("Panda panel bounded; outside touches pass through")
