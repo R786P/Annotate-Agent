@@ -4,7 +4,11 @@ import re
 path = Path("android/app/src/main/java/com/r786p/annotateagent/live/LiveScreenService.kt")
 s = path.read_text()
 
-# Keep the already-working draggable/edge-hide overlay behavior.
+# -----------------------------------------------------------------------------
+# Panda overlay: keep the existing working bubble, but make it draggable and
+# edge-hideable. The patch is intentionally idempotent because Actions runs it
+# on every build.
+# -----------------------------------------------------------------------------
 if "bubbleParams: WindowManager.LayoutParams" not in s:
     s = s.replace(
         "private var bubble: PandaBubbleView? = null",
@@ -159,9 +163,10 @@ if "setOnDragListener" not in s:
     if count != 1:
         raise SystemExit("touch handler not found")
 
-# Gemini 3.1 Flash Live does not use clientContent for normal turns after the
-# initial setup/history. Text questions must go through realtimeInput.text.
-# Also wait for setupComplete before allowing the first user message.
+# -----------------------------------------------------------------------------
+# Gemini 3.1 Flash Live: after setup, normal user text must be sent through
+# realtimeInput.text. clientContent is reserved for initial history on 3.1.
+# -----------------------------------------------------------------------------
 if "private var liveReady = false" not in s:
     s = s.replace(
         "private var listening = false",
@@ -169,21 +174,19 @@ if "private var liveReady = false" not in s:
         1,
     )
 
-if "setupComplete" not in s:
+# Reset readiness on socket open and mark it only after setupComplete arrives.
+if "liveReady = false" not in s:
     s = s.replace(
-        '''            override fun onOpen(webSocket: WebSocket, response: Response) {
-                val setupRoot = JSONObject().put("setup", JSONObject())''',
-        '''            override fun onOpen(webSocket: WebSocket, response: Response) {
-                liveReady = false
-                val setupRoot = JSONObject().put("setup", JSONObject())''',
+        "override fun onOpen(webSocket: WebSocket, response: Response) {",
+        "override fun onOpen(webSocket: WebSocket, response: Response) {\n                liveReady = false",
         1,
     )
 
-s = s.replace(
-    '''            override fun onMessage(webSocket: WebSocket, text: String) { parseGeminiMessage(text) }
+if "root.has(\"setupComplete\")" not in s:
+    old_callbacks = '''            override fun onMessage(webSocket: WebSocket, text: String) { parseGeminiMessage(text) }
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { showAnswer("Gemini Live connection error: ${t.message ?: "unknown error"}") }
-            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { showAnswer("Live connection closed.") }''',
-    '''            override fun onMessage(webSocket: WebSocket, text: String) {
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { showAnswer("Live connection closed.") }'''
+    new_callbacks = '''            override fun onMessage(webSocket: WebSocket, text: String) {
                 try {
                     val root = JSONObject(text)
                     if (root.has("setupComplete")) {
@@ -201,58 +204,40 @@ s = s.replace(
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 liveReady = false
                 showAnswer("Live connection closed.")
-            }''',
-    1,
-)
+            }'''
+    if old_callbacks not in s:
+        raise SystemExit("websocket callbacks block not found")
+    s = s.replace(old_callbacks, new_callbacks, 1)
 
+# Do not stream screen frames before the Live setup is acknowledged.
 s = s.replace(
     "if (now - lastFrameAt < FRAME_INTERVAL_MS || webSocket == null) return",
-    "if (now - lastFrameAt < FRAME_INTERVAL_MS || !liveReady) return",
+    "if (now - lastFrameAt < FRAME_INTERVAL_MS || webSocket == null || !liveReady) return",
     1,
 )
 
-old_send = '''    private fun sendText(question: String) {
-        val socket = webSocket
-        if (socket == null) {
-            showAnswer("🔴 Live connection ready nahi hai. Panda ko restart karke dobara try karo.")
-            return
-        }
-        val message = JSONObject()
-            .put("clientContent", JSONObject()
-                .put("turns", JSONArray().put(
-                    JSONObject()
-                        .put("role", "user")
-                        .put("parts", JSONArray().put(JSONObject().put("text", question)))
-                ))
-                .put("turnComplete", true)
-            )
-        if (socket.send(message.toString())) {
-            showAnswer("You: $question\n\n⏳ Soch raha hoon...")
-        } else {
-            showAnswer("🔴 Message send nahi hua. Live connection dobara start karo.")
-        }
-    }
-'''
+# Replace whatever sendText implementation is currently present. Regex makes
+# this resilient to harmless formatting changes in the Kotlin file.
+send_re = re.compile(r"    private fun sendText\(question: String\) \{.*?\n    \}\n\n    private fun showAnswer", re.S)
 new_send = '''    private fun sendText(question: String) {
         val socket = webSocket
         if (socket == null || !liveReady) {
             showAnswer("🔴 Live connection abhi ready nahi hai. 1–2 second rukkar dobara Send karo.")
             return
         }
-        // Gemini 3.1 Flash Live accepts normal post-setup text turns via
-        // realtimeInput.text. clientContent is reserved for initial history.
         val message = JSONObject()
             .put("realtimeInput", JSONObject().put("text", question))
         if (socket.send(message.toString())) {
-            showAnswer("You: $question\n\n⏳ Soch raha hoon...")
+            showAnswer("You: $question\\n\\n⏳ Soch raha hoon...")
         } else {
             showAnswer("🔴 Message send nahi hua. Live connection dobara start karo.")
         }
     }
-'''
-if old_send not in s:
-    raise SystemExit("sendText block not found")
-s = s.replace(old_send, new_send, 1)
+
+    private fun showAnswer'''
+s, count = send_re.subn(new_send, s, count=1)
+if count != 1:
+    raise SystemExit("sendText function not found")
 
 s = s.replace("overlayView = null; bubble = null", "overlayView = null; bubble = null; bubbleParams = null", 1)
 s = s.replace("webSocket?.close(1000, \"User stopped Live Screen\"); webSocket = null", "webSocket?.close(1000, \"User stopped Live Screen\"); webSocket = null; liveReady = false", 1)
