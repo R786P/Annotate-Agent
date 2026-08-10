@@ -97,5 +97,13 @@ show_new = '''    private fun showAnswer(text: String) {
 '''
 s, count = show_re.subn(show_new, s, count=1)
 if count != 1: raise SystemExit("showAnswer block not found")
+
+# Bundle the same polished panel into the APK so opening it never depends on Render serving HTML.
+asset = Path("android/app/src/main/assets/mobile_panel.html")
+asset.parent.mkdir(parents=True, exist_ok=True)
+source = Path("static/mobile_panel.html")
+if not source.exists(): raise SystemExit("static/mobile_panel.html not found")
+asset.write_text(source.read_text())
+
 path.write_text(s)
 print("Panda panel uses local APK asset; larger bounded touchable window")
