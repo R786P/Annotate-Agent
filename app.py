@@ -67,7 +67,7 @@ def analyze():
         payload = {"contents": [{"parts": [{"inline_data": {"mime_type": mime_type, "data": video_b64}}, {"text": build_prompt(instructions)}]}]}
         resp = requests.post(GEMINI_URL, params={"key": GEMINI_API_KEY}, json=payload, timeout=120)
         if resp.status_code != 200:
-            return jsonify({"error": f"Gemini API error ({resp.status_code}): {resp.text[:300]}"}), 500
+            return jsonify({"error": f"Gemini API error ({resp.status_code}): {resp.text[:500]}"}), 500
         data = resp.json()
         raw_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
         if raw_text.startswith("```"):
@@ -84,7 +84,6 @@ def analyze():
             os.remove(video_path)
 
 
-# NEW: Live Screen token endpoint. Existing /analyze flow remains unchanged.
 @app.route('/live-token', methods=['POST'])
 def live_token():
     if not GEMINI_API_KEY:
@@ -113,6 +112,60 @@ def live_token():
     except Exception as e:
         print('Live token exception:', repr(e))
         return jsonify({"error": f"Live Screen start nahi ho saka: {type(e).__name__}: {e}"}), 500
+
+
+# Reliable HTTP fallback for live-screen chat.
+# The browser keeps capturing the screen, but chat replies no longer depend on a
+# browser WebSocket staying alive. The latest screen frame is sent with the user message.
+@app.route('/live-chat', methods=['POST'])
+def live_chat():
+    if not GEMINI_API_KEY:
+        return jsonify({"error": "GEMINI_API_KEY set nahi hai Render environment variables me."}), 500
+    try:
+        body = request.get_json(silent=True) or {}
+        message = str(body.get('message', '')).strip()
+        image_b64 = body.get('image')
+        if not message:
+            return jsonify({"error": "Message khaali hai."}), 400
+
+        parts = [{
+            "text": (
+                "Tum Annotate Agent ho. User ki shared screen ka latest screenshot diya gaya hai. "
+                "Screen par jo visible UI, error, button ya content hai usko samjho aur user ko "
+                "Hindi/Hinglish me seedha, concise jawab do. User ke sawal ka direct answer do. "
+                "Password, API key, token ya secret kabhi repeat mat karo.\n\n"
+                f"USER MESSAGE:\n{message}"
+            )
+        }]
+        if image_b64:
+            parts.insert(0, {
+                "inline_data": {
+                    "mime_type": "image/jpeg",
+                    "data": image_b64
+                }
+            })
+
+        payload = {"contents": [{"parts": parts}]}
+        resp = requests.post(GEMINI_URL, params={"key": GEMINI_API_KEY}, json=payload, timeout=90)
+        if resp.status_code != 200:
+            print('Live chat Gemini error:', resp.status_code, resp.text[:1000])
+            return jsonify({"error": f"Gemini API error ({resp.status_code}): {resp.text[:500]}"}), 500
+
+        data = resp.json()
+        candidates = data.get('candidates') or []
+        if not candidates:
+            return jsonify({"error": "Gemini ne koi response nahi diya."}), 502
+        response_parts = candidates[0].get('content', {}).get('parts', [])
+        text = ''.join(p.get('text', '') for p in response_parts if p.get('text')).strip()
+        if not text:
+            return jsonify({"error": "Gemini response me text nahi mila."}), 502
+        return jsonify({"reply": text})
+    except requests.RequestException as e:
+        print('Live chat request exception:', repr(e))
+        return jsonify({"error": f"Gemini connection error: {e}"}), 502
+    except Exception as e:
+        print('Live chat exception:', repr(e))
+        return jsonify({"error": f"Live chat failed: {type(e).__name__}: {e}"}), 500
 
 
 if __name__ == '__main__':
