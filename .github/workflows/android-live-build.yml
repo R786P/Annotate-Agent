@@ -1,0 +1,73 @@
+name: Android Live Screen Build
+
+on:
+  push:
+    branches: [feature/android-live-screen]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10'
+
+      - name: Patch Kotlin build compatibility
+        working-directory: android
+        run: sed -i 's/LinearLayout.LayoutParams(-1, 0, 1f).apply { minHeight = 180 }/LinearLayout.LayoutParams(-1, 0, 1f)/' app/src/main/java/com/r786p/annotateagent/live/LiveScreenService.kt
+
+      - name: Patch panda overlay
+        run: python3 scripts/patch_panda_overlay.py
+
+      - name: Patch beautiful panda chat panel
+        run: python3 scripts/patch_chat_panel.py
+
+      - name: Add native draggable resizable chat window
+        run: python3 scripts/patch_panel_window.py
+
+      - name: Patch reliable HTTP Panda chat and Hindi voice
+        run: python3 scripts/patch_http_chat.py
+
+      - name: Fix generated Gemini text Kotlin syntax
+        working-directory: android
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          p = Path("app/src/main/java/com/r786p/annotateagent/live/LiveScreenService.kt")
+          s = p.read_text()
+          s2, n = re.subn(
+              r'showAnswer\("You: \$question".*?"⏳ Soch रहा हूँ\.\.\."\)',
+              'showAnswer("You: $question | ⏳ Soch raha hoon...")',
+              s,
+              count=1,
+              flags=re.S,
+          )
+          if n != 1:
+              print("Gemini text response block already compatible")
+          else:
+              p.write_text(s2)
+              print("Fixed generated Gemini text response Kotlin syntax")
+          PY
+
+      - name: Build Android debug APK
+        working-directory: android
+        run: gradle assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: annotate-agent-live-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
