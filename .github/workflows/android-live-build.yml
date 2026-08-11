@@ -34,6 +34,9 @@ jobs:
       - name: Patch beautiful panda chat panel
         run: python3 scripts/patch_chat_panel.py
 
+      - name: Patch reliable HTTP Panda chat and Hindi voice
+        run: python3 scripts/patch_http_chat.py
+
       - name: Fix generated Gemini text Kotlin syntax
         working-directory: android
         run: |
@@ -50,7 +53,6 @@ jobs:
               flags=re.S,
           )
           if n != 1:
-              # The current source may already use the simple fixed sendText form.
               print("Gemini text response block already compatible")
           else:
               p.write_text(s2)
