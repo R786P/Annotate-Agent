@@ -22,12 +22,12 @@ s = s.replace('val encoded = Base64.encodeToString(output.toByteArray(), Base64.
 
 # Replace socket-dependent sendText with the reliable Render HTTP endpoint.
 pattern = re.compile(r'    private fun sendText\(question: String\) \{.*?\n    \}\n\n    private fun showAnswer', re.S)
-replacement = '''    private fun sendText(question: String) {
+replacement = r'''    private fun sendText(question: String) {
         if (backendUrl.isBlank()) {
             showAnswer("🔴 Backend URL available nahi hai.")
             return
         }
-        showAnswer("You: $question\\n\\n⏳ Jawab aa raha hai...")
+        showAnswer("You: $question\n\n⏳ Jawab aa raha hai...")
         val payload = JSONObject()
             .put("question", question)
             .put("image", latestFrameBase64)
@@ -44,7 +44,7 @@ replacement = '''    private fun sendText(question: String) {
                 response.use {
                     val body = it.body?.string().orEmpty()
                     if (!it.isSuccessful) {
-                        showAnswer("🔴 Server error: HTTP ${it.code}\\n$body")
+                        showAnswer("🔴 Server error: HTTP ${it.code}\n$body")
                         return
                     }
                     try {
